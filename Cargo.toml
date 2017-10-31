@@ -1,0 +1,8 @@
+[package]
+name = "dd_stat"
+version = "0.1.0"
+authors = ["rfm"]
+
+[dependencies]
+clap = { version = "*", features = ["yaml"] }
+nix = "*"
