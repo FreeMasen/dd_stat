@@ -2153,7 +2153,8 @@ dd_copy (void)
               next_time += XTIME_PRECISION;
             }
         }
-        
+      //RM: if partial + full is greater than or equal to
+      //max records plus 1 (if max bytes is not null)
       if (r_partial + r_full >= max_records + !!max_bytes)
         break;
 
