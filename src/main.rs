@@ -1,18 +1,17 @@
 use std::path::{PathBuf};
 use std::fs::{metadata, File};
 use std::io::prelude::*;
-use std::io::{stderr, stdout};
 use std::io::{BufReader, BufWriter};
 use std::string::String;
 use std::str::FromStr;
 use std::usize;
-use std::ops::Add;
 mod bar;
-use bar::Bar;
+use bar::{Bar, BarBuilder};
 
 extern crate clap;
 use clap::{Arg, App, ArgMatches};
 
+extern crate termion;
 
 fn main() {
     let matches = get_matches();
@@ -25,7 +24,7 @@ fn main() {
     let partial_block = target_size % block_size;
     println!("infile: {}", in_path_str);
     println!("outfile: {}", out_path_str);
-    println!("bs: {} ({})", bs_str, block_size);
+    println!("bs: {} ({})", bs_str, block_size);    
     println!("infile size: {}", target_size);
     println!("full blocks: {}", full_blocks);
     println!("remaining bytes: {}", partial_block);
@@ -36,14 +35,18 @@ fn main() {
     let out_file = File::create(out_path).expect("Unable to create outfile");
     let mut out_buf = BufWriter::new(out_file);
     let mut total_written = 0;
-    let mut bar = Bar::new(target_size);
+    let mut bar = BarBuilder::new()
+                            .total(target_size)
+                            .width(50)
+                            .include_percent()
+                            .get_bar();
     for i in 0..full_blocks {
         let mut buffer_box = Vec::with_capacity(block_size).into_boxed_slice();
         in_buf.read_exact(&mut buffer_box).expect("error in read");
         out_buf.write(&mut buffer_box).expect("error in write");
         total_written += block_size;
         bar.update(block_size);
-        // println!("written {:?}\ntarget: {:?}\n{:?}",  total_written, target_size, (total_written as f32 / target_size as f32) * 100.0);
+        update_display(&bar);
     }
     if partial_block > 0 {
         let mut buffer_box = Vec::with_capacity(partial_block).into_boxed_slice();
@@ -51,15 +54,20 @@ fn main() {
         out_buf.write(&mut buffer_box).expect("error in write of partial block");
         total_written += partial_block;
         bar.update(partial_block);
-        // println!("written {:?}\ntarget: {:?}\n{:?}",  total_written, target_size, (total_written as f32 / target_size as f32) * 100.0);
+        update_display(&bar);
     }
-    
+    print!("\n");
+    println!("written {:?}\ntarget: {:?}",  total_written, target_size);
 }
 
-fn compute_block_size(block_Size: &str) -> usize {
-    let last_i = block_Size.len() -1;
-    let last_char = block_Size.get(last_i..last_i+1);
-    let num_str = block_Size.get(..last_i).expect("index error");
+fn update_display(progress: &Bar) {
+    print!("{}{}", termion::cursor::Left((progress.get_last_width()) as u16), progress.to_string());
+}
+
+fn compute_block_size(block_size: &str) -> usize {
+    let last_i = block_size.len() -1;
+    let last_char = block_size.get(last_i..last_i+1);
+    let num_str = block_size.get(..last_i).expect("index error");
     let num = usize::from_str(num_str).expect("blocksize not formatted correctly");
     
     match last_char {
