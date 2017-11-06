@@ -1,69 +1,85 @@
-use std::process::{Command, Stdio};
 use std::path::{PathBuf};
-use std::fs::{metadata};
+use std::fs::{metadata, File};
 use std::io::prelude::*;
-use std::io::{BufReader};
+use std::io::{BufReader, BufWriter};
 use std::string::String;
+use std::str::FromStr;
+use std::usize;
+mod bar;
+use bar::{Bar, BarBuilder};
+
 extern crate clap;
 use clap::{Arg, App, ArgMatches};
-extern crate nix;
+
+extern crate termion;
 
 fn main() {
     let matches = get_matches();
-    let in_file = matches.value_of("infile").unwrap_or_else(|| panic!("input is required"));
-    let out_file = matches.value_of("outfile").unwrap_or_else(|| panic!("output is required"));
-    let bs = matches.value_of("blocksize").unwrap_or("1m");
-    let target_size = get_in_size(in_file.to_string().clone());
-    println!("infile is {} bytes", target_size);
-    let mut dd = Command::new("dd")
-                        .args(&[
-                            format!("if={}", in_file),
-                            format!("of={}", out_file),
-                            format!("bs={}", bs),
-                            ])
-                        .stderr(Stdio::inherit())
-                        .stdout(Stdio::inherit())
-                        .stdin(Stdio::piped())
-                        .spawn()
-                        .expect("Error from dd");
-    println!("pre-loop");
-    let dd_pid = nix::unistd::Pid::from_raw(dd.id().clone() as i32);
-    loop {
-        println!("loop");
-        match dd.try_wait() {
-            Ok(status) => {
-                match status {
-                    Some(status) => {
-                        println!("dd is done {}", status);
-                        break;
-                    },
-                    None => {
-                        println!("No status");
-                        // let stdo = dd.stdout.as_mut().expect("Couldn't take stdout as mut");
-                        println!("took stdout as mut");
-                        // let mut stdout = BufReader::new(stdo);
-                        println!("converted stdout to BufReader");
-                        nix::sys::signal::kill(dd_pid, nix::sys::signal::SIGSTOP).unwrap();
-                        println!("sent SIGSTOP");
-                        // let mut line = String::new();
-                        // stdout.read_line(&mut line).expect("Unable to read to line");
-                        // println!("stdout: {}", line);
-                        // let buf = stdout.fill_buf();
-                        // println!("Filled buffer");
-                        // match buf {
-                        //     Ok(buffer) => {
-                        //         let text = String::from_utf8(buffer.to_vec()).expect("Unable to convert buffer to text");
-                        //         println!("stdout: {}", text);
-                        //     },
-                        //     Err(e) => println!("error: {}", e)
-                        // }
-                    }
-                }
-            },
-            Err(e) => println!("Error in dd:\n{}", e)
-        }
+    let in_path_str = matches.value_of("infile").expect("infile is required");
+    let out_path_str = matches.value_of("outfile").expect("outfile is required");
+    let bs_str = matches.value_of("blocksize").unwrap_or("1m");
+    let target_size = get_in_size(in_path_str.to_string().clone());
+    let block_size = compute_block_size(bs_str);
+    let full_blocks = target_size / block_size;
+    let partial_block = target_size % block_size;
+    println!("infile: {}", in_path_str);
+    println!("outfile: {}", out_path_str);
+    println!("bs: {} ({})", bs_str, block_size);    
+    println!("infile size: {}", target_size);
+    println!("full blocks: {}", full_blocks);
+    println!("remaining bytes: {}", partial_block);
+    let in_path = PathBuf::from(in_path_str);
+    let in_file = File::open(in_path).expect("Unable to open infile");
+    let mut in_buf = BufReader::new(in_file);
+    let out_path = PathBuf::from(out_path_str);
+    let out_file = File::create(out_path).expect("Unable to create outfile");
+    let mut out_buf = BufWriter::new(out_file);
+    let mut total_written = 0;
+    let mut bar = BarBuilder::new()
+                            .total(target_size)
+                            .width(50)
+                            .include_percent()
+                            .get_bar();
+    for i in 0..full_blocks {
+        let mut buffer_box = Vec::with_capacity(block_size).into_boxed_slice();
+        in_buf.read_exact(&mut buffer_box).expect("error in read");
+        out_buf.write(&mut buffer_box).expect("error in write");
+        total_written += block_size;
+        bar.update(block_size);
+        update_display(&bar);
     }
-    dd.wait().expect("dd error");
+    if partial_block > 0 {
+        let mut buffer_box = Vec::with_capacity(partial_block).into_boxed_slice();
+        in_buf.read_exact(&mut buffer_box).expect("error in write of partial block");
+        out_buf.write(&mut buffer_box).expect("error in write of partial block");
+        total_written += partial_block;
+        bar.update(partial_block);
+        update_display(&bar);
+    }
+    print!("\n");
+    println!("written {:?}\ntarget: {:?}",  total_written, target_size);
+}
+
+fn update_display(progress: &Bar) {
+    print!("{}{}", termion::cursor::Left((progress.get_last_width()) as u16), progress.to_string());
+}
+
+fn compute_block_size(block_size: &str) -> usize {
+    let last_i = block_size.len() -1;
+    let last_char = block_size.get(last_i..last_i+1);
+    let num_str = block_size.get(..last_i).expect("index error");
+    let num = usize::from_str(num_str).expect("blocksize not formatted correctly");
+    
+    match last_char {
+        Some(ch) => 
+            match ch.to_lowercase().as_str() {
+                "k" => num * 1024,
+                "m" => num * 1024 * 1024,
+                "g" => num * 1024 * 1024 * 1024,
+                _ => num
+            }
+        None => num
+    }
 }
 
 fn get_matches() ->  ArgMatches<'static> {
@@ -87,13 +103,8 @@ fn get_matches() ->  ArgMatches<'static> {
             .get_matches()
 }
 
-fn get_in_size(path: String) -> i32 {
+fn get_in_size(path: String) -> usize {
     let path = PathBuf::from(path);
     let md = metadata(path).expect("Unable to get metadata for infile");
-    md.len() as i32
+    md.len() as usize
 }
-
-// fn calculate_progress(target: i32, bytes_transfered: String) -> i32 {
-//     let progress = bytes_transfered.parse::<i32>().unwrap();
-//     progress / target
-// }

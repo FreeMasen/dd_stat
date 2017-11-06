@@ -5,4 +5,4 @@ authors = ["rfm"]
 
 [dependencies]
 clap = { version = "*", features = ["yaml"] }
-nix = "*"
+termion = "*"
