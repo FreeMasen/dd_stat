@@ -5,8 +5,8 @@ use std::io::{BufReader, BufWriter};
 use std::string::String;
 use std::str::FromStr;
 use std::usize;
-mod bar;
-use bar::{Bar, BarBuilder};
+extern crate progress_string;
+use progress_string::{Bar, BarBuilder};
 
 extern crate clap;
 use clap::{Arg, App, ArgMatches};
@@ -39,8 +39,9 @@ fn main() {
                             .total(target_size)
                             .width(50)
                             .include_percent()
+                            .include_numbers()
                             .get_bar();
-    for i in 0..full_blocks {
+    for _ in 0..full_blocks {
         let mut buffer_box = Vec::with_capacity(block_size).into_boxed_slice();
         in_buf.read_exact(&mut buffer_box).expect("error in read");
         out_buf.write(&mut buffer_box).expect("error in write");

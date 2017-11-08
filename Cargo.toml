@@ -4,5 +4,6 @@ version = "0.1.0"
 authors = ["rfm"]
 
 [dependencies]
-clap = { version = "*", features = ["yaml"] }
-termion = "*"
+clap = { version = "^2.27.1", features = ["yaml"] }
+termion = "^1.5.1"
+progress_string = "^0.1.1"
